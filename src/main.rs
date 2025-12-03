@@ -6,10 +6,13 @@
     holding buffers for the duration of a data transfer."
 )]
 
-use defmt::info;
+use defmt::{Debug2Format, info};
 use display_interface_spi::SPIInterface;
+use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
 use embassy_embedded_hal::shared_bus::asynch::spi::SpiDevice;
 use embassy_executor::Spawner;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::mutex::Mutex;
 use embassy_time::{Duration, Timer};
 use embedded_graphics::Drawable;
 use embedded_graphics::mono_font::ascii::FONT_6X10;
@@ -18,9 +21,11 @@ use embedded_graphics::pixelcolor::BinaryColor;
 use embedded_graphics::prelude::Point;
 use embedded_graphics::text::{Text, TextStyle};
 use embedded_hal_bus::spi::ExclusiveDevice;
+use esp_hal::Async;
 use esp_hal::clock::CpuClock;
 use esp_hal::delay::Delay;
 use esp_hal::gpio::{AnyPin, Input, InputConfig, Level, Output, OutputConfig};
+use esp_hal::i2c::master::{Config as I2cConfig, I2c};
 use esp_hal::peripherals::{GPIO42, GPIO45, GPIO46, GPIO47, GPIO48, UART1};
 use esp_hal::spi::Mode;
 use esp_hal::spi::master::Config;
@@ -28,11 +33,15 @@ use esp_hal::spi::master::Spi;
 use esp_hal::time::Rate;
 use esp_hal::timer::timg::TimerGroup;
 use panic_rtt_target as _;
-use weact_studio_epd::{TriColor, WeActStudio290TriColorDriver};
+use static_cell::StaticCell;
+use vl53l0x::VL53L0x;
 use weact_studio_epd::graphics::Display290TriColor;
+use weact_studio_epd::{TriColor, WeActStudio290TriColorDriver};
 
 use crate::display::display_task;
-use crate::sensor::{ButtoToOpenLid, FillSensor, Sensor, human_detection_task};
+use crate::lora::lora_task;
+use crate::sensor::{ButtoToOpenLid, FillSensor, LidTOFSensor, Sensor, human_detection_task};
+use crate::servo::servo_task;
 use crate::system::{DISPLAY_SIGNAL, HUMAN_SENSOR_RESUME_SIGNAL, director};
 
 extern crate alloc;
@@ -46,6 +55,10 @@ mod system;
 // This creates a default app-descriptor required by the esp-idf bootloader.
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
 esp_bootloader_esp_idf::esp_app_desc!();
+
+static SPI_BUS: StaticCell<
+    Mutex<CriticalSectionRawMutex, esp_hal::spi::master::Spi<'static, Async>>,
+> = StaticCell::new();
 
 type RealSensor = ButtoToOpenLid;
 
@@ -83,66 +96,88 @@ async fn main(spawner: Spawner) -> ! {
     let rst = peripherals.GPIO2;
     let busy = peripherals.GPIO1;
 
-    spawner.spawn( display_task(sda.into(), scl.into(), cs.into(), dc.into(), rst.into(), busy.into(), peripherals.SPI3)).ok();
+    // spawner.spawn( display_task(sda.into(), scl.into(), cs.into(), dc.into(), rst.into(), busy.into(), peripherals.SPI3)).ok();
 
+    // let button = Input::new(peripherals.GPIO45, InputConfig::default());
 
-    let button = Input::new(peripherals.GPIO45, InputConfig::default());
+    // let mut servo = servo::Servo::new(mcpwm_pin, servo_pin.into());
+    // let mut human_sensor = RealSensor::new(button);
+    // human_sensor.init().ok();
 
-    let mut servo = servo::Servo::new(mcpwm_pin, servo_pin.into());
-    let mut human_sensor = RealSensor::new(button);
-    human_sensor.init().ok();
+    // info!("Init display refresh");
+    // DISPLAY_SIGNAL.signal(());
+    // HUMAN_SENSOR_RESUME_SIGNAL.signal(());
 
-    info!("Init display refresh");
-    DISPLAY_SIGNAL.signal(());
-    HUMAN_SENSOR_RESUME_SIGNAL.signal(());
+    // spawner.spawn(human_detection_task(human_sensor)).ok();
 
-    spawner.spawn(human_detection_task(human_sensor)).ok();
+    // spawner.spawn(director()).ok();
 
-    spawner.spawn(director()).ok();
-
-    servo.close();
-    // servo.open();
     // servo.close();
+    // spawner.spawn(servo_task(servo)).ok();
 
-    loop {
-        // let res = human_sensor.read().await.unwrap_or_default();
+    let lid_scl = peripherals.GPIO40;
+    let lid_sca = peripherals.GPIO41;
 
-        // // info!("Sensor read: {}", res.value);
-        // let res = human_sensor.process(res).unwrap_or(false);
+    let i2c = I2c::new(
+        peripherals.I2C0,
+        I2cConfig::default().with_frequency(Rate::from_khz(100)),
+    )
+    .unwrap()
+    .with_sda(lid_sca)
+    .with_scl(lid_scl)
+    .into_async();
 
-        // if res {
-        //     servo.open();
-        // } else {
-        //     servo.close();
-        // }
+    info!("I2c initialized");
 
-        Timer::after_secs(1).await;
-    }
+    let mut lid_sensor = LidTOFSensor::new(i2c);
 
-    // // Initialize SPI
-    // let nss = Output::new(peripherals.GPIO8, Level::High, OutputConfig::default());
-    // let sclk = peripherals.GPIO9;
-    // let mosi = peripherals.GPIO10;
-    // let miso = peripherals.GPIO11;
 
-    // let reset = Output::new(peripherals.GPIO12, Level::Low, OutputConfig::default());
-    // let busy = Input::new(peripherals.GPIO13, InputConfig::default());
-    // let dio1 = Input::new(peripherals.GPIO14, InputConfig::default());
 
-    // let spi = Spi::new(
-    //     peripherals.SPI2,
-    //     Config::default()
-    //         .with_frequency(Rate::from_khz(100))
-    //         .with_mode(Mode::_0),
-    // )
-    // .unwrap()
-    // .with_sck(sclk)
-    // .with_mosi(mosi)
-    // .with_miso(miso)
-    // .into_async();
+    // loop {
+    //     // let res = human_sensor.read().await.unwrap_or_default();
 
-    // // Initialize the static SPI bus
-    // let spi_bus = SPI_BUS.init(Mutex::new(spi));
+    //     // // info!("Sensor read: {}", res.value);
+    //     // let res = human_sensor.process(res).unwrap_or(false);
+
+    //     // if res {
+    //     //     servo.open();
+    //     // } else {
+    //     //     servo.close();
+    //     // }
+
+    //     Timer::after_secs(1).await;
+    // }
+
+    // Initialize SPI
+    let nss = Output::new(peripherals.GPIO8, Level::High, OutputConfig::default());
+    let sclk = peripherals.GPIO9;
+    let mosi = peripherals.GPIO10;
+    let miso = peripherals.GPIO11;
+
+    let reset = Output::new(peripherals.GPIO12, Level::Low, OutputConfig::default());
+    let busy = Input::new(peripherals.GPIO13, InputConfig::default());
+    let dio1 = Input::new(peripherals.GPIO14, InputConfig::default());
+
+    let spi = Spi::new(
+        peripherals.SPI2,
+        Config::default()
+            .with_frequency(Rate::from_khz(100))
+            .with_mode(Mode::_0),
+    )
+    .unwrap()
+    .with_sck(sclk)
+    .with_mosi(mosi)
+    .with_miso(miso)
+    .into_async();
+
+    let rng = esp_hal::rng::Rng::new();
+
+    // Initialize the static SPI bus
+    let spi_bus = SPI_BUS.init(Mutex::new(spi));
+
+    spawner.spawn(lora_task(spi_bus, nss, reset, dio1, busy, rng)).ok();
+
+
     // let spi_device = SpiDevice::new(spi_bus, nss);
 
     // // Create the SX1262 configuration
@@ -252,9 +287,8 @@ async fn main(spawner: Spawner) -> ! {
 
     // }
 
-    // loop {
-    //     info!("Hello world!");
-    //     Timer::after(Duration::from_secs(1)).await;
-    // }
+    loop {
+        info!("Hello world!");
+        Timer::after(Duration::from_secs(1)).await;
+    }
 }
-

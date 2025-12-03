@@ -1,37 +1,47 @@
-use defmt::{Format, error, info};
+use defmt::{Debug2Format, Format, error, info};
 use embassy_time::{Delay, Duration, Instant, Timer};
 use embedded_hal::delay::DelayNs;
+use embedded_hal::i2c::I2c;
+use esp_hal::peripherals::I2C0;
+use esp_hal::time::Rate;
 use esp_hal::uart::{Config as UARTConfig, Uart};
 use esp_hal::{
     Blocking,
     gpio::{AnyPin, Input, Output},
     peripherals::{GPIO6, UART1},
 };
-use hcsr04::{Hcsr04, NoTemperatureCompensation};
 
-use crate::system::{HUMAN_SENSOR_RESUME_SIGNAL, HUMAN_SIGNAL};
+use esp_hal::i2c::master::Config as I2cConfig;
+use vl53l0x::VL53L0x;
+
+use crate::system::{HUMAN_EVENTS, HUMAN_SENSOR_RESUME_SIGNAL, HUMAN_SIGNAL, HumanEvent};
 use crate::{RealSensor, sensor};
 
 const READ_TOTAL_TIME: Duration = Duration::from_millis(1000);
 const READ_TIMEOUT_BETWEEN_READS: Duration = Duration::from_millis(100);
 const HEADER_BYTE: u8 = 0xFF;
 
-const SENSOR_SLEEP: Duration = Duration::from_millis(100);
+const SENSOR_SLEEP: Duration = Duration::from_millis(10);
 
 #[embassy_executor::task]
 pub async fn human_detection_task(mut sensor: RealSensor) {
+    let mut was_detected = false;
     loop {
         let measurement = sensor.read().await;
         match measurement {
             Ok(meas) => {
-                let detected = sensor.process(meas);
-                match detected {
-                    Ok(status) => {
-                        if status {
+                let is_detected = sensor.process(meas);
+                match is_detected {
+                    Ok(is_detected) => {
+                        // Only send event if state changed
+                        if is_detected && !was_detected {
                             info!("Human detected!");
-                            HUMAN_SIGNAL.signal(());
-                        } else {
-                            HUMAN_SIGNAL.reset();
+                            HUMAN_EVENTS.send(HumanEvent::Detected).await;
+                            was_detected = true;
+                        } else if !is_detected && was_detected {
+                            info!("Human left!");
+                            HUMAN_EVENTS.send(HumanEvent::Gone).await;
+                            was_detected = false;
                         }
                     }
                     Err(e) => {
@@ -116,86 +126,66 @@ impl Sensor for ButtoToOpenLid {
     }
 }
 
-/// Lid ultrasonic sensor implementation, specific to human detection
-pub struct LidUltrasonicSensor {
+pub struct LidTOFSensor<I2C>
+where
+    I2C: I2c,
+{
     // sensor: Hcsr04<Output<'static>, Input<'static>, Delay>
-    trig: Output<'static>,
-    echo: Input<'static>,
+    sensor: VL53L0x<I2C>,
 }
 
-impl LidUltrasonicSensor {
-    pub fn new(trig: Output<'static>, echo: Input<'static>) -> Self {
-        Self {
-            // sensor: Hcsr04::builder().trig(trig).echo(echo).delay(Delay).temperature(NoTemperatureCompensation).build()
-            trig,
-            echo,
-        }
-    }
-}
-
-/// Trait implementation for LidUltrasonicSensor
-impl Sensor for LidUltrasonicSensor {
+impl<I2C> Sensor for LidTOFSensor<I2C>
+where
+    I2C: I2c,
+{
     fn init(&mut self) -> Result<(), SensorError> {
-        info!("[SENSOR STATE] - Init Over");
+        if let Err(e) = self.sensor.set_measurement_timing_budget(20_000) {
+            info!("Error setting timing budget: {:?}", Debug2Format(&e));
+        }
+
+        // Start Continuous Mode (0 = run forever)
+        if let Err(e) = self.sensor.start_continuous(0) {
+            info!("Error starting continuous mode: {:?}", Debug2Format(&e));
+        }
+        info!("VL53L0x initialized");
         Ok(())
     }
 
-    /// Read distance measurement from the sensor
     async fn read(&mut self) -> Result<Measurement, SensorError> {
-        // let distance: f32 = self.sensor.measure_distance().await.unwrap_or(0.0);
-        Timer::after_millis(5).await;
+        self.sensor
+            .read_range_continuous_millimeters_blocking()
+            .map(|distance| Measurement { value: distance })
+            .map_err(|e| {
+                info!("Error reading range: {:?}", Debug2Format(&e));
+                SensorError::Bus
+            })
 
-        self.trig.set_low();
-        Timer::after_micros(2).await;
-        self.trig.set_high();
-        Timer::after_micros(10).await;
-        self.trig.set_low();
 
-        // Wait for rising edge with timeout
-        let start = Instant::now();
-        while self.echo.is_low() {
-            if (Instant::now() - start).as_millis() > 25 {
-                return Err(SensorError::Timeout);
-            }
-        }
-        let time1 = Instant::now();
-        let mut counter = 0_u128;
-        while self.echo.is_high() {
-            if (Instant::now() - time1).as_millis() > 25 {
-                error!("Timeout");
-                return Err(SensorError::Timeout);
-            }
-
-            counter += 1;
-        }
-
-        let time2 = Instant::now();
-        let pulse_width = (time2 - time1).as_micros() as f32;
-
-        let distance = ((pulse_width * 0.343) / 2_f32) as u16;
-
-        info!("pulse_width: {}, distance: {}", pulse_width, distance);
-        info!("counter: {}", counter);
-
-        Ok(Measurement { value: distance })
     }
 
     fn sleep(&mut self) -> Result<(), SensorError> {
-        info!("[SENSOR STATE] - Sleep");
-        Ok(())
+        todo!()
     }
 
-    /// Process the measurement to determine if a human is detected
     fn process(&mut self, meas: Measurement) -> Result<bool, SensorError> {
-        // Todo calibrate
-
-        if meas.value > 300 {
-            Ok(false)
-        } else {
-            Ok(true)
+        match meas.value {
+            distance if distance < 500 => Ok(true),
+            _ => Ok(false),                       
         }
     }
 }
+
+impl<I2C> LidTOFSensor<I2C>
+where
+    I2C: I2c,
+{
+    pub fn new(i2c: I2C) -> Self {
+
+        let sensor = VL53L0x::new(i2c).expect("Failed to init VL53L0x");
+        Self { sensor }
+    }
+}
+
 
 /// Ultrasonic sensor implementation
 pub struct FillSensor {

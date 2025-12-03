@@ -6,6 +6,29 @@ use esp_hal::mcpwm::{McPwm, PeripheralClockConfig};
 use esp_hal::peripherals::MCPWM0;
 use esp_hal::time::Rate;
 
+use crate::system::SERVO_EVENTS;
+
+
+
+#[embassy_executor::task]
+pub async fn servo_task(mut servo: Servo) {
+    loop {
+        let action = SERVO_EVENTS.receiver().receive().await;
+
+        match action {
+            crate::system::ServoAction::Open => {
+                info!("Servo task: Open command received");
+                servo.open();
+            }
+            crate::system::ServoAction::Close => {
+                info!("Servo task: Close command received");
+                servo.close();
+            }
+        }
+    }
+}
+
+
 /// Struct representing a servo motor controlled via MCPWM
 ///
 /// Example usage:

@@ -29,7 +29,10 @@ use weact_studio_epd::{TriColor, WeActStudio290TriColorDriver};
 use core::fmt::Write;
 use heapless::String;
 
-use crate::system::{DISPLAY_DONE_SIGNAL, DISPLAY_SIGNAL, FillLevel, HUMAN_SENSOR_RESUME_SIGNAL, TRASHCAN_STATE, TrashCanState};
+use crate::system::{
+    DISPLAY_DONE_SIGNAL, DISPLAY_SIGNAL, FillLevel, HUMAN_SENSOR_RESUME_SIGNAL, TRASHCAN_STATE,
+    TrashCanState,
+};
 
 #[embassy_executor::task]
 pub async fn display_task(
@@ -68,18 +71,14 @@ pub async fn display_task(
 
     display_driver.init().await;
 
-
     loop {
-
         DISPLAY_SIGNAL.wait().await;
         info!("Display Signal Received");
         {
-
             let state = TRASHCAN_STATE.lock().await;
             info!("State Received, changing screen to {}", state.fill);
             display_driver.wake_up().await;
             display_driver.draw_state(&state);
-
         }
 
         display_driver.refresh().await;
@@ -88,9 +87,7 @@ pub async fn display_task(
 
         DISPLAY_DONE_SIGNAL.signal(());
     }
-
 }
-
 
 /// A wrapper around the display driver to handle layout and styling.
 pub struct StatusScreen<DI, BSY, RST, DLY> {
@@ -182,7 +179,6 @@ where
             .full_update(&self.display)
             .await
             .expect("Couldn't update the display");
-
     }
 
     fn update_bar(&mut self, state: &TrashCanState) {
@@ -199,7 +195,7 @@ where
 
     /// Full screen refresh based on the provided state.
     pub fn draw_state(&mut self, state: &TrashCanState) {
-        // self.display.clear(TriColor::White);
+        self.display.clear(TriColor::White);
 
         let is_critical = matches!(state.fill, FillLevel::Full | FillLevel::Overflow);
         let border_style = if is_critical {
@@ -294,7 +290,7 @@ where
 
         let mut text_buffer: String<128> = String::new();
         // Format: "RSSI: -80 | Payload: A1 B2..."
-        write!(text_buffer, "LoRa: {} dBm", state.lora_rssi).unwrap();
+        write!(text_buffer, "LoRa: {}", state.lora_connected).unwrap();
         Text::new(
             &text_buffer,
             Point::new(col_1, start_y),
@@ -325,6 +321,14 @@ where
         )
         .draw(&mut self.display)
         .unwrap();
+
+        // Clear the area before drawing status
+        // Area covers from x=180 to x=296 (approx 116px width) and y=95 to y=130 (35px height)
+        // This ensures both "No Pests" and "RACCOON DETECTED!" are cleared.
+        // Rectangle::new(Point::new(180, start_y), Size::new(116, 35))
+        //     .into_styled(PrimitiveStyle::with_fill(TriColor::White))
+        //     .draw(&mut self.display)
+        //     .unwrap();
 
         if state.raccoon_detected {
             Text::with_alignment(

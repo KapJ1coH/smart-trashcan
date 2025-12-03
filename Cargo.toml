@@ -58,6 +58,7 @@ embedded-graphics = { version = "0.8.1", features = ["defmt"] }
 display-interface = { version = "0.5.0", features = ["defmt-03"] }
 embedded-hal-async = { version = "1.0.0", features = ["defmt-03"] }
 embassy-sync = { version = "0.7.2", features = ["defmt"] }
+vl53l0x = "1.0.1"
 # lorawan-device = { version = "~0.12", features = ["embassy-time", "defmt", "serde"] }
 # embassy-time = { version = ">0.4", features = ["defmt"] }
 
