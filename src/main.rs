@@ -40,7 +40,7 @@ use weact_studio_epd::{TriColor, WeActStudio290TriColorDriver};
 
 use crate::display::display_task;
 use crate::lora::lora_task;
-use crate::sensor::{ButtoToOpenLid, FillSensor, LidTOFSensor, Sensor, human_detection_task};
+use crate::sensor::{ButtoToOpenLid, FillSensor, LidTOFSensor, Sensor, fill_level_task, human_detection_task};
 use crate::servo::servo_task;
 use crate::system::{DISPLAY_SIGNAL, HUMAN_SENSOR_RESUME_SIGNAL, director};
 
@@ -60,10 +60,10 @@ static SPI_BUS: StaticCell<
     Mutex<CriticalSectionRawMutex, esp_hal::spi::master::Spi<'static, Async>>,
 > = StaticCell::new();
 
-type RealSensor = ButtoToOpenLid;
+type RealSensor = LidTOFSensor<I2c<'static, Async>>;
 
 #[esp_rtos::main]
-async fn main(spawner: Spawner) -> ! {
+async fn main(spawner: Spawner) {
     // generator version: 1.0.1
 
     rtt_target::rtt_init_defmt!();
@@ -78,75 +78,6 @@ async fn main(spawner: Spawner) -> ! {
 
     info!("Embassy initialized!");
 
-    // TODO: Spawn some tasks
-    let _ = spawner;
-
-    // let ultrasonic_rx_pin: GPIO48<'static> = peripherals.GPIO48;
-    // let ultrasonic_mode_toggle_pin: GPIO47<'static> = peripherals.GPIO47;
-    // let uart: UART1<'static> = peripherals.UART1;
-
-    let servo_pin = peripherals.GPIO46;
-    let mcpwm_pin = peripherals.MCPWM0;
-
-    let sda = peripherals.GPIO6;
-    let scl = peripherals.GPIO5;
-
-    let cs = peripherals.GPIO4;
-    let dc = peripherals.GPIO3;
-    let rst = peripherals.GPIO2;
-    let busy = peripherals.GPIO1;
-
-    // spawner.spawn( display_task(sda.into(), scl.into(), cs.into(), dc.into(), rst.into(), busy.into(), peripherals.SPI3)).ok();
-
-    // let button = Input::new(peripherals.GPIO45, InputConfig::default());
-
-    // let mut servo = servo::Servo::new(mcpwm_pin, servo_pin.into());
-    // let mut human_sensor = RealSensor::new(button);
-    // human_sensor.init().ok();
-
-    // info!("Init display refresh");
-    // DISPLAY_SIGNAL.signal(());
-    // HUMAN_SENSOR_RESUME_SIGNAL.signal(());
-
-    // spawner.spawn(human_detection_task(human_sensor)).ok();
-
-    // spawner.spawn(director()).ok();
-
-    // servo.close();
-    // spawner.spawn(servo_task(servo)).ok();
-
-    let lid_scl = peripherals.GPIO40;
-    let lid_sca = peripherals.GPIO41;
-
-    let i2c = I2c::new(
-        peripherals.I2C0,
-        I2cConfig::default().with_frequency(Rate::from_khz(100)),
-    )
-    .unwrap()
-    .with_sda(lid_sca)
-    .with_scl(lid_scl)
-    .into_async();
-
-    info!("I2c initialized");
-
-    let mut lid_sensor = LidTOFSensor::new(i2c);
-
-
-
-    // loop {
-    //     // let res = human_sensor.read().await.unwrap_or_default();
-
-    //     // // info!("Sensor read: {}", res.value);
-    //     // let res = human_sensor.process(res).unwrap_or(false);
-
-    //     // if res {
-    //     //     servo.open();
-    //     // } else {
-    //     //     servo.close();
-    //     // }
-
-    //     Timer::after_secs(1).await;
-    // }
 
     // Initialize SPI
     let nss = Output::new(peripherals.GPIO8, Level::High, OutputConfig::default());
@@ -175,120 +106,61 @@ async fn main(spawner: Spawner) -> ! {
     // Initialize the static SPI bus
     let spi_bus = SPI_BUS.init(Mutex::new(spi));
 
-    spawner.spawn(lora_task(spi_bus, nss, reset, dio1, busy, rng)).ok();
+    // spawner.spawn(lora_task(spi_bus, nss, reset, dio1, busy, rng)).ok();
 
 
-    // let spi_device = SpiDevice::new(spi_bus, nss);
+    let ultrasonic_rx_pin: GPIO48<'static> = peripherals.GPIO48;
+    // let ultrasonic_mode_toggle_pin: GPIO47<'static> = peripherals.GPIO47;
+    let uart: UART1<'static> = peripherals.UART1;
 
-    // // Create the SX1262 configuration
-    // let sx126x_config = sx126x::Config {
-    //     chip: Sx1262,
-    //     tcxo_ctrl: Some(TcxoCtrlVoltage::Ctrl1V7),
-    //     use_dcdc: false,
-    //     rx_boost: true,
-    // };
+    let servo_pin = peripherals.GPIO46;
+    let mcpwm_pin = peripherals.MCPWM0;
 
-    // // Create the radio instance
-    // let iv = GenericSx126xInterfaceVariant::new(reset, dio1, busy, None, None).unwrap();
-    // let mut lora = LoRa::new(
-    //     Sx126x::new(spi_device, iv, sx126x_config),
-    //     true,
-    //     embassy_time::Delay,
-    // )
-    // .await
-    // .unwrap();
+    let sda = peripherals.GPIO6;
+    let scl = peripherals.GPIO5;
 
-    // let radio: LorawanRadio<_, _, MAX_TX_POWER> = lora.into();
-    // let region = region::Configuration::new(LORAWAN_REGION);
-    // let mut device: Device<_, _, _> = Device::new(region, radio, EmbassyTimer::new(), rng);
+    let cs = peripherals.GPIO4;
+    let dc = peripherals.GPIO3;
+    let rst = peripherals.GPIO2;
+    let busy = peripherals.GPIO1;
 
-    // info!("Starting...");
+    spawner.spawn( display_task(sda.into(), scl.into(), cs.into(), dc.into(), rst.into(), busy.into(), peripherals.SPI3)).ok();
 
-    // loop {
-    //     let response = device
-    //         .join(&JoinMode::OTAA {
-    //             deveui: DevEui::from([0xA7, 0x45, 0x07, 0xD0, 0x7E, 0xD5, 0xB3, 0x70]),
-    //             appkey: AppKey::from([
-    //                 0xD5, 0x57, 0x81, 0x4A, 0xA9, 0x1B, 0x69, 0xAA, 0xDF, 0xA8, 0x28, 0x9C, 0x64,
-    //                 0x77, 0x72, 0x9C,
-    //             ]),
-    //             appeui: AppEui::from([0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]),
-    //         })
-    //         .await;
+    let lid_scl = peripherals.GPIO40;
+    let lid_sca = peripherals.GPIO41;
 
-    //     match response {
-    //         Ok(response) => match response {
-    //             lorawan_device::async_device::JoinResponse::JoinSuccess => {
-    //                 info!("LoRaWAN network joined succesfully!");
-    //                 break;
-    //             }
-    //             lorawan_device::async_device::JoinResponse::NoJoinAccept => {
-    //                 error!("No join accept from LoRaWAN network");
-    //             }
-    //         },
-    //         Err(err) => {
-    //             error!("{}", err);
-    //             continue;
-    //         }
-    //     };
+    let i2c = I2c::new(
+        peripherals.I2C0,
+        I2cConfig::default().with_frequency(Rate::from_khz(100)),
+    )
+    .unwrap()
+    .with_sda(lid_sca)
+    .with_scl(lid_scl)
+    .into_async();
 
-    //     Timer::after_millis(500).await;
-    // }
+    info!("I2c initialized");
 
-    // let mut msg_buf = heapless::String::<256>::new();
-    // use core::fmt::Write;
+    // let mut lid_sensor = LidTOFSensor::new(i2c);
+    let mut human_sensor = RealSensor::new(i2c);
+    human_sensor.init().expect("Human sensor init fail");
 
-    // // Loop that waits for Web signals and activates hardware accordingly
-    // loop {
-    //     msg_buf.clear();
-    //     let id = rng.random();
-    //     let timestamp = Instant::now().as_millis();
-    //     match HW_SIGNAL.wait().await {
-    //         DeviceCommand::Unlock => {
-    //             let distance = ultrasonic_sensor
-    //                 .read()
-    //                 .await
-    //                 .unwrap_or(Measurement { value: 1000 });
-    //             info!("distance: {}", distance.value);
-    //             let res = ultrasonic_sensor.process(distance).unwrap_or(false);
-    //             if res {
-    //                 info!("Person is detected!");
-    //                 let _ = write!(
-    //                     msg_buf,
-    //                     "Opening the gate. Timestamp: {}ms, ID: {}",
-    //                     timestamp, id
-    //                 );
-    //                 green_led.set_high();
-    //                 red_led.set_low();
-    //                 info!("1500");
-    //                 pwm_pin.set_timestamp(1500);
-    //                 Timer::after_millis(1500).await;
-    //             } else {
-    //                 warn!("Auth OK but no person detected!");
-    //                 let _ = write!(
-    //                     msg_buf,
-    //                     "Auth OK but no person detected! Timestamp: {}ms, ID: {}",
-    //                     timestamp, id
-    //                 );
-    //                 HW_SIGNAL.signal(DeviceCommand::Deny);
-    //             }
-    //         }
-    //         DeviceCommand::Deny => {
-    //             let _ = write!(msg_buf, "Deny! Timestamp: {}ms, ID: {}", timestamp, id);
-    //             red_led.set_high();
-    //             green_led.set_low();
-    //             warn!("Deny");
-    //             pwm_pin.set_timestamp(500);
-    //             Timer::after_millis(1500).await;
-    //         }
-    //     }
+    let mut fill_sensor = FillSensor::new(ultrasonic_rx_pin.into(),  uart);
+    fill_sensor.init().expect("Failed to init fill sensor");
 
-    //     device.send(msg_buf.as_bytes(), 1, true).await.unwrap();
+    let mut servo = servo::Servo::new(mcpwm_pin, servo_pin.into());
 
-    // }
+    info!("Init display refresh");
+    DISPLAY_SIGNAL.signal(());
+    HUMAN_SENSOR_RESUME_SIGNAL.signal(());
 
-    loop {
-        info!("Hello world!");
-        Timer::after(Duration::from_secs(1)).await;
-    }
+    spawner.spawn(human_detection_task(human_sensor)).ok();
+    spawner.spawn(fill_level_task(fill_sensor)).ok();
+
+    spawner.spawn(director()).ok();
+
+    servo.close();
+    spawner.spawn(servo_task(servo)).ok();
+
+
+
 }

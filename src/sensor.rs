@@ -1,3 +1,5 @@
+use core::i16;
+
 use defmt::{Debug2Format, Format, error, info};
 use embassy_time::{Delay, Duration, Instant, Timer};
 use embedded_hal::delay::DelayNs;
@@ -14,14 +16,33 @@ use esp_hal::{
 use esp_hal::i2c::master::Config as I2cConfig;
 use vl53l0x::VL53L0x;
 
-use crate::system::{HUMAN_EVENTS, HUMAN_SENSOR_RESUME_SIGNAL, HUMAN_SIGNAL, HumanEvent};
-use crate::{RealSensor, sensor};
+use crate::RealSensor;
+use crate::system::{CHECK_FILL_LEVEL, FillLevel, HUMAN_EVENTS, HUMAN_SENSOR_RESUME_SIGNAL, HUMAN_SIGNAL, HumanEvent, TRASHCAN_STATE};
 
-const READ_TOTAL_TIME: Duration = Duration::from_millis(1000);
+const READ_TOTAL_TIME: Duration = Duration::from_millis(500);
 const READ_TIMEOUT_BETWEEN_READS: Duration = Duration::from_millis(100);
 const HEADER_BYTE: u8 = 0xFF;
 
 const SENSOR_SLEEP: Duration = Duration::from_millis(10);
+
+#[embassy_executor::task]
+pub async fn fill_level_task(mut sensor: FillSensor) {
+    loop {
+        CHECK_FILL_LEVEL.wait().await;
+        let measurement = sensor.read().await;
+        match measurement {
+            Ok(meas) => {
+                let fill_level = sensor.distance_to_fill_level(meas.value);
+                TRASHCAN_STATE.lock().await.fill = fill_level;
+            }
+            Err(e) => {
+                error!("Error reading sensor: {:?}", e);
+            }
+        }
+    }
+}
+
+
 
 #[embassy_executor::task]
 pub async fn human_detection_task(mut sensor: RealSensor) {
@@ -130,7 +151,6 @@ pub struct LidTOFSensor<I2C>
 where
     I2C: I2c,
 {
-    // sensor: Hcsr04<Output<'static>, Input<'static>, Delay>
     sensor: VL53L0x<I2C>,
 }
 
@@ -169,7 +189,7 @@ where
 
     fn process(&mut self, meas: Measurement) -> Result<bool, SensorError> {
         match meas.value {
-            distance if distance < 500 => Ok(true),
+            distance if distance < 100 => Ok(true),
             _ => Ok(false),                       
         }
     }
@@ -190,7 +210,6 @@ where
 /// Ultrasonic sensor implementation
 pub struct FillSensor {
     uart: Uart<'static, Blocking>,
-    ultrasonic_mode_toggle_pin: Output<'static>,
 }
 
 /// Implementation for UltrasonicSensor
@@ -198,7 +217,6 @@ impl FillSensor {
     /// Constructor for UltrasonicSensor
     pub fn new(
         ultrasonic_rx_pin: AnyPin<'static>,
-        ultrasonic_mode_toggle_pin: Output<'static>,
         uart: UART1<'static>,
     ) -> Self {
         let uart_cfg = UARTConfig::default().with_baudrate(9_600);
@@ -211,15 +229,34 @@ impl FillSensor {
             uart: Uart::new(uart, uart_cfg)
                 .unwrap()
                 .with_rx(ultrasonic_rx_pin),
-            ultrasonic_mode_toggle_pin,
         }
     }
+
+    fn distance_to_fill_level(&self, distance_mm: u16) -> FillLevel {
+
+        let max_distance_mm: u16 = 1000; 
+        let min_distance_mm: u16 = 200;
+
+        let delta: u16 = max_distance_mm - min_distance_mm;
+
+        let percentage: i16 = ((distance_mm - min_distance_mm) as f32 / delta as f32 * 100_f32) as i16 ;
+
+        match percentage {
+            i16::MIN..=-1 => FillLevel::Overflow,
+            0..=10 => FillLevel::Full,
+            11..=25 => FillLevel::ThreeQuarters,
+            26..=50 => FillLevel::Half,
+            51..=75 => FillLevel::Quarter,
+            76..=i16::MAX => FillLevel::Empty,
+        }
+
+    }
+    
 }
 
 impl Sensor for FillSensor {
     /// initialize all the hardware
     fn init(&mut self) -> Result<(), SensorError> {
-        self.ultrasonic_mode_toggle_pin.set_high();
         info!("[SENSOR STATE] - Init Over");
         Ok(())
     }
@@ -250,11 +287,6 @@ impl Sensor for FillSensor {
 
     /// Process the value and output detection status
     fn process(&mut self, meas: Measurement) -> Result<bool, SensorError> {
-        // TODO return false if full, else true
-        if meas.value < 600 && meas.value != 0 {
-            Ok(true)
-        } else {
-            Ok(false)
-        }
+        unimplemented!()
     }
 }

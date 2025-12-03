@@ -11,6 +11,7 @@ pub static DISPLAY_SIGNAL: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 pub static HUMAN_SIGNAL: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 pub static HUMAN_SENSOR_RESUME_SIGNAL: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 pub static DISPLAY_DONE_SIGNAL: Signal<CriticalSectionRawMutex, ()> = Signal::new();
+pub static CHECK_FILL_LEVEL: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
 pub static TRASHCAN_STATE: Mutex<CriticalSectionRawMutex, TrashCanState> = Mutex::new(TrashCanState::new());
 pub static LORA_SEND_CHANNEL: Channel<CriticalSectionRawMutex, heapless::String<256>, 5> = Channel::new();
@@ -78,19 +79,21 @@ pub async fn director() {
     loop {
         // Wait for a specific event (Arrived or Gone)
         let event = HUMAN_EVENTS.receive().await;
-        
+        let deteceted = match event {
+            HumanEvent::Detected => {
+                info!("Raccoon detected! Updating state and notifying display.");
+                true
+            },
+            HumanEvent::Gone => {
+                info!("Raccoon gone. Updating state.");
+                CHECK_FILL_LEVEL.signal(()); 
+
+                false
+            }
+        };
         {
             let mut state = TRASHCAN_STATE.lock().await;
-            match event {
-                HumanEvent::Detected => {
-                    info!("Raccoon detected! Updating state and notifying display.");
-                    state.raccoon_detected = true;
-                },
-                HumanEvent::Gone => {
-                    info!("Raccoon gone. Updating state.");
-                    state.raccoon_detected = false;
-                }
-            }
+            state.raccoon_detected = deteceted;
         }
 
         // Signal the display to update only when an event actually occurred
