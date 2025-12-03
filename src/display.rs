@@ -29,7 +29,7 @@ use weact_studio_epd::{TriColor, WeActStudio290TriColorDriver};
 use core::fmt::Write;
 use heapless::String;
 
-use crate::system::{DISPLAY_SIGNAL, FillLevel, TRASHCAN_STATE, TrashCanState};
+use crate::system::{DISPLAY_DONE_SIGNAL, DISPLAY_SIGNAL, FillLevel, HUMAN_SENSOR_RESUME_SIGNAL, TRASHCAN_STATE, TrashCanState};
 
 #[embassy_executor::task]
 pub async fn display_task(
@@ -86,7 +86,7 @@ pub async fn display_task(
 
         display_driver.sleep().await;
 
-        Timer::after(embassy_time::Duration::from_secs(10)).await;
+        DISPLAY_DONE_SIGNAL.signal(());
     }
 
 }

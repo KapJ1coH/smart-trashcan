@@ -9,6 +9,7 @@ pub static DISPLAY_SIGNAL: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
 pub static HUMAN_SIGNAL: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 pub static HUMAN_SENSOR_RESUME_SIGNAL: Signal<CriticalSectionRawMutex, ()> = Signal::new();
+pub static DISPLAY_DONE_SIGNAL: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
 pub static TRASHCAN_STATE: Mutex<CriticalSectionRawMutex, TrashCanState> = Mutex::new(TrashCanState::new());
 
@@ -66,17 +67,7 @@ pub async fn director() {
         TRASHCAN_STATE.lock().await.raccoon_detected = true;
 
         DISPLAY_SIGNAL.signal(());
-
-
-
-
-
-
-
-
-
-
-        // signal after all tasks are done
+        DISPLAY_DONE_SIGNAL.wait().await;
         HUMAN_SENSOR_RESUME_SIGNAL.signal(());
     }
 

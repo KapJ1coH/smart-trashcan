@@ -20,11 +20,7 @@ const SENSOR_SLEEP: Duration = Duration::from_millis(100);
 
 #[embassy_executor::task]
 pub async fn human_detection_task(mut sensor: RealSensor) {
-    'detection_loop: loop {
-        if !HUMAN_SENSOR_RESUME_SIGNAL.signaled() {
-            continue 'detection_loop;
-        }
-
+    loop {
         let measurement = sensor.read().await;
         match measurement {
             Ok(meas) => {
@@ -33,8 +29,9 @@ pub async fn human_detection_task(mut sensor: RealSensor) {
                     Ok(status) => {
                         if status {
                             info!("Human detected!");
-                            HUMAN_SENSOR_RESUME_SIGNAL.reset();
                             HUMAN_SIGNAL.signal(());
+                        } else {
+                            HUMAN_SIGNAL.reset();
                         }
                     }
                     Err(e) => {

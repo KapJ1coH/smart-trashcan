@@ -33,7 +33,7 @@ use weact_studio_epd::graphics::Display290TriColor;
 
 use crate::display::display_task;
 use crate::sensor::{ButtoToOpenLid, FillSensor, Sensor, human_detection_task};
-use crate::system::{HUMAN_SENSOR_RESUME_SIGNAL, director};
+use crate::system::{DISPLAY_SIGNAL, HUMAN_SENSOR_RESUME_SIGNAL, director};
 
 extern crate alloc;
 
@@ -91,6 +91,9 @@ async fn main(spawner: Spawner) -> ! {
     let mut servo = servo::Servo::new(mcpwm_pin, servo_pin.into());
     let mut human_sensor = RealSensor::new(button);
     human_sensor.init().ok();
+
+    info!("Init display refresh");
+    DISPLAY_SIGNAL.signal(());
     HUMAN_SENSOR_RESUME_SIGNAL.signal(());
 
     spawner.spawn(human_detection_task(human_sensor)).ok();
