@@ -64,8 +64,8 @@ impl Servo {
 
         Servo {
             servo_data_pin: pwm_pin,
-            min_pulse: 500,
-            max_pulse: 2500,
+            min_pulse: 2000,
+            max_pulse: 2400,
         }
     }
 
@@ -81,14 +81,14 @@ impl Servo {
 
     /// Open the servo (set to max pulse width)
     pub fn open(&mut self) {
-        info!("Servo open");
-        self.set_timestamp(self.max_pulse)
+        info!("Servo open: {}", self.min_pulse);
+        self.set_timestamp(self.min_pulse)
     }
 
     /// Open the servo (set to min pulse width)
     pub fn close(&mut self) {
-        // info!("Servo close");
-        self.set_timestamp(self.min_pulse)
+        info!("Servo close: {}", self.max_pulse);
+        self.set_timestamp(self.max_pulse)
     }
 
     /// Set the servo pulse width in microseconds

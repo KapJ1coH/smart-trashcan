@@ -1,5 +1,8 @@
 use defmt::{Format, info};
+use embassy_futures::select::{Either, select};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::{self, Channel}, mutex::Mutex, signal::Signal};
+use embassy_time::{Duration, Timer};
+use esp_hal::gpio::Input;
 
 
 
@@ -74,18 +77,63 @@ pub enum FillLevel {
 
 
 
+/// Director task that manages human detection events and coordinates actions
 #[embassy_executor::task]
-pub async fn director() {
-    loop {
+pub async fn director(mut button: Input<'static>) {
+    'director: loop {
         // Wait for a specific event (Arrived or Gone)
-        let event = HUMAN_EVENTS.receive().await;
+
+        // select(a, b){
+        //     event = HUMAN_SIGNAL.wait,
+        //     _ = button.wait_for_rising_edge()
+        // }.await;
+
+        // Used to enable button for testing and maintenance
+        let result = select(
+            HUMAN_EVENTS.receiver().receive(),
+            button.wait_for_rising_edge(),
+        ).await;
+
+        let event;
+
+        match result {
+            Either::First(_event) => {
+                info!("Director: Human signal received.");
+                event = _event;
+            }
+            Either::Second(_) => {
+                info!("Director: Button pressed. Simulating human arrival.");
+                Timer::after(Duration::from_millis(100)).await; // Debounce delay
+                SERVO_EVENTS.send(ServoAction::Open).await;
+
+                Timer::after(Duration::from_millis(1000)).await; // Debounce delay
+
+                // Wait for another press to close the lid
+                button.wait_for_rising_edge().await;
+                SERVO_EVENTS.send(ServoAction::Close).await;
+                Timer::after(Duration::from_millis(300)).await; // Debounce delay
+
+                continue 'director;
+            }
+        }
+
+
+        // let event = HUMAN_EVENTS.receive().await;
         let deteceted = match event {
             HumanEvent::Detected => {
                 info!("Raccoon detected! Updating state and notifying display.");
+                SERVO_EVENTS.send(ServoAction::Open).await;
                 true
             },
             HumanEvent::Gone => {
-                info!("Raccoon gone. Updating state.");
+                info!("Raccoon gone. Updating state. Once the lid closes in 5 sec");
+
+                for i in (1..=5).rev() {
+                    info!("Closing lid in {} seconds...", i);
+                    Timer::after(Duration::from_secs(1)).await;
+                }
+
+                SERVO_EVENTS.send(ServoAction::Close).await;
                 CHECK_FILL_LEVEL.signal(()); 
 
                 false

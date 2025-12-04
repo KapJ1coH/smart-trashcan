@@ -149,6 +149,10 @@ async fn main(spawner: Spawner) {
 
     let mut servo = servo::Servo::new(mcpwm_pin, servo_pin.into());
 
+    let button_pin = Input::new(peripherals.GPIO45, InputConfig::default());
+
+    // let button = ButtoToOpenLid::new(button_pin);
+
     info!("Init display refresh");
     DISPLAY_SIGNAL.signal(());
     HUMAN_SENSOR_RESUME_SIGNAL.signal(());
@@ -156,7 +160,7 @@ async fn main(spawner: Spawner) {
     spawner.spawn(human_detection_task(human_sensor)).ok();
     spawner.spawn(fill_level_task(fill_sensor)).ok();
 
-    spawner.spawn(director()).ok();
+    spawner.spawn(director(button_pin)).ok();
 
     servo.close();
     spawner.spawn(servo_task(servo)).ok();
