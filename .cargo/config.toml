@@ -5,6 +5,8 @@ runner = "probe-rs run --chip=esp32s3 --preverify --always-print-stacktrace --no
 
 [env]
 DEFMT_LOG="info"
+EMBASSY_EXECUTOR_TASK_ARENA_SIZE="16384"
+
 
 [build]
 rustflags = [

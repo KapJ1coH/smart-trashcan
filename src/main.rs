@@ -39,7 +39,7 @@ use weact_studio_epd::graphics::Display290TriColor;
 use weact_studio_epd::{TriColor, WeActStudio290TriColorDriver};
 
 use crate::display::display_task;
-use crate::lora::lora_task;
+// use crate::lora::lora_task;
 use crate::sensor::{ButtoToOpenLid, FillSensor, LidTOFSensor, Sensor, fill_level_task, human_detection_task};
 use crate::servo::servo_task;
 use crate::system::{DISPLAY_SIGNAL, HUMAN_SENSOR_RESUME_SIGNAL, director};
@@ -51,6 +51,7 @@ mod lora;
 mod sensor;
 mod servo;
 mod system;
+mod wifi;
 
 // This creates a default app-descriptor required by the esp-idf bootloader.
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
@@ -79,34 +80,35 @@ async fn main(spawner: Spawner) {
     info!("Embassy initialized!");
 
 
-    // Initialize SPI
-    let nss = Output::new(peripherals.GPIO8, Level::High, OutputConfig::default());
-    let sclk = peripherals.GPIO9;
-    let mosi = peripherals.GPIO10;
-    let miso = peripherals.GPIO11;
+    // // Initialize SPI
+    // let nss = Output::new(peripherals.GPIO8, Level::High, OutputConfig::default());
+    // let sclk = peripherals.GPIO9;
+    // let mosi = peripherals.GPIO10;
+    // let miso = peripherals.GPIO11;
 
-    let reset = Output::new(peripherals.GPIO12, Level::Low, OutputConfig::default());
-    let busy = Input::new(peripherals.GPIO13, InputConfig::default());
-    let dio1 = Input::new(peripherals.GPIO14, InputConfig::default());
+    // let reset = Output::new(peripherals.GPIO12, Level::Low, OutputConfig::default());
+    // let busy = Input::new(peripherals.GPIO13, InputConfig::default());
+    // let dio1 = Input::new(peripherals.GPIO14, InputConfig::default());
 
-    let spi = Spi::new(
-        peripherals.SPI2,
-        Config::default()
-            .with_frequency(Rate::from_khz(100))
-            .with_mode(Mode::_0),
-    )
-    .unwrap()
-    .with_sck(sclk)
-    .with_mosi(mosi)
-    .with_miso(miso)
-    .into_async();
+    // let spi = Spi::new(
+    //     peripherals.SPI2,
+    //     Config::default()
+    //         .with_frequency(Rate::from_khz(100))
+    //         .with_mode(Mode::_0),
+    // )
+    // .unwrap()
+    // .with_sck(sclk)
+    // .with_mosi(mosi)
+    // .with_miso(miso)
+    // .into_async();
 
-    let rng = esp_hal::rng::Rng::new();
+    // let rng = esp_hal::rng::Rng::new();
 
-    // Initialize the static SPI bus
-    let spi_bus = SPI_BUS.init(Mutex::new(spi));
+    // // Initialize the static SPI bus
+    // let spi_bus = SPI_BUS.init(Mutex::new(spi));
 
-    // spawner.spawn(lora_task(spi_bus, nss, reset, dio1, busy, rng)).ok();
+    // // spawner.spawn(lora_task(spi_bus, nss, reset, dio1, busy, rng)).ok();
+    spawner.spawn(wifi::run_network(peripherals.WIFI, spawner.clone())).ok();
 
 
     let ultrasonic_rx_pin: GPIO48<'static> = peripherals.GPIO48;
@@ -158,9 +160,9 @@ async fn main(spawner: Spawner) {
     HUMAN_SENSOR_RESUME_SIGNAL.signal(());
 
     spawner.spawn(human_detection_task(human_sensor)).ok();
-    spawner.spawn(fill_level_task(fill_sensor)).ok();
+    // spawner.spawn(fill_level_task(fill_sensor)).ok();
 
-    spawner.spawn(director(button_pin)).ok();
+    spawner.spawn(director(button_pin, fill_sensor)).ok();
 
     servo.close();
     spawner.spawn(servo_task(servo)).ok();

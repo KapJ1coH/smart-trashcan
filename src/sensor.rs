@@ -33,11 +33,26 @@ pub async fn fill_level_task(mut sensor: FillSensor) {
         match measurement {
             Ok(meas) => {
                 let fill_level = sensor.distance_to_fill_level(meas.value);
-                TRASHCAN_STATE.lock().await.fill = fill_level;
+                TRASHCAN_STATE.lock().await.fill_level = fill_level;
+                info!("Trash can fill level updated: {:?}, distance: {}", fill_level, meas.value);
             }
             Err(e) => {
                 error!("Error reading sensor: {:?}", e);
             }
+        }
+    }
+}
+
+pub async fn single_fill_level_reading(sensor: &mut FillSensor) -> Result<FillLevel, SensorError> {
+    let measurement = sensor.read().await;
+    match measurement {
+        Ok(meas) => {
+            let fill_level = sensor.distance_to_fill_level(meas.value);
+            Ok(fill_level)
+        }
+        Err(e) => {
+            error!("Error reading sensor: {:?}", e);
+            Err(e)
         }
     }
 }
@@ -47,6 +62,7 @@ pub async fn fill_level_task(mut sensor: FillSensor) {
 #[embassy_executor::task]
 pub async fn human_detection_task(mut sensor: RealSensor) {
     let mut was_detected = false;
+    let mut detected_count = 0;
     loop {
         let measurement = sensor.read().await;
         match measurement {
@@ -56,6 +72,10 @@ pub async fn human_detection_task(mut sensor: RealSensor) {
                     Ok(is_detected) => {
                         // Only send event if state changed
                         if is_detected && !was_detected {
+                            detected_count += 1;
+                            if detected_count < 2 { // To prevent false positives
+                                continue;
+                            }
                             info!("Human detected!");
                             HUMAN_EVENTS.send(HumanEvent::Detected).await;
                             was_detected = true;
@@ -233,13 +253,18 @@ impl FillSensor {
     }
 
     fn distance_to_fill_level(&self, distance_mm: u16) -> FillLevel {
+        if distance_mm == 0 {
+            return FillLevel::Overflow;
+        }
 
-        let max_distance_mm: u16 = 1000; 
-        let min_distance_mm: u16 = 200;
+        let max_distance_mm: u16 = 265; 
+        let min_distance_mm: u16 = 45;
 
         let delta: u16 = max_distance_mm - min_distance_mm;
 
         let percentage: i16 = ((distance_mm - min_distance_mm) as f32 / delta as f32 * 100_f32) as i16 ;
+
+        info!("Distance: {} mm, Empty Space Left Percentage: {}%", distance_mm, percentage);
 
         match percentage {
             i16::MIN..=-1 => FillLevel::Overflow,
@@ -247,7 +272,8 @@ impl FillSensor {
             11..=25 => FillLevel::ThreeQuarters,
             26..=50 => FillLevel::Half,
             51..=75 => FillLevel::Quarter,
-            76..=i16::MAX => FillLevel::Empty,
+            76..=125 => FillLevel::Empty,
+            126..=i16::MAX => FillLevel::Overflow,
         }
 
     }
